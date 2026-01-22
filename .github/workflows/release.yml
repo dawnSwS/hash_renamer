@@ -15,36 +15,31 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # [修复] Bash 版本号生成
       - name: Generate Version Number
         id: versioning
-        shell: powershell
+        shell: bash
         run: |
-          # 读取 Cargo.toml 内容
-          $cargoContent = Get-Content Cargo.toml -Raw
+          # 提取 version 行
+          VERSION_LINE=$(grep '^version\s*=' Cargo.toml | head -n 1)
+          # 提取主版本号
+          BASE_VERSION=$(echo "$VERSION_LINE" | sed -E 's/version\s*=\s*"([0-9]+\.[0-9]+).*/\1/')
           
-          # 正则提取主版本号 (Major.Minor)
-          if ($cargoContent -match 'version\s*=\s*"(?<ver>\d+\.\d+)\.\d+"') {
-              $baseVersion = $Matches.ver
-          } else {
-              $baseVersion = "1.0"
-          }
+          if [ -z "$BASE_VERSION" ]; then BASE_VERSION="1.0"; fi
           
-          # 组合新版本号
-          $newVersion = "$baseVersion.${{ github.run_number }}"
-          Write-Host "::notice::Target Build Version: $newVersion"
+          NEW_VERSION="${BASE_VERSION}.${{ github.run_number }}"
+          echo "::notice::Target Build Version: $NEW_VERSION"
           
-          # 将版本号保存到环境变量
-          echo "BUILD_VERSION=$newVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          echo "BUILD_VERSION=$NEW_VERSION" >> $GITHUB_ENV
 
       # ----------------------------------------------------------------
       # 2. 修改 Cargo.toml 版本
-      # 目的：让编译出的 .exe 文件属性中包含正确的版本信息
+      # [修复] Bash + sed，无 BOM 烦恼
       # ----------------------------------------------------------------
       - name: Update Cargo Version
-        shell: powershell
+        shell: bash
         run: |
-          $ver = $env:BUILD_VERSION
-          (Get-Content Cargo.toml) -replace '^version = ".*"', "version = `"$ver`"" | Set-Content Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"$BUILD_VERSION\"/" Cargo.toml
 
       - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -65,31 +60,26 @@ jobs:
 
       # ----------------------------------------------------------------
       # 3. 编译安装包 (ISCC)
-      # 优化：使用命令行参数 /D 和 /F 动态传入版本号和文件名
+      # [修复] Bash 调用 Windows 程序 (注意 // 参数)
       # ----------------------------------------------------------------
       - name: Compile Installer (.exe)
-        shell: powershell
+        shell: bash
         run: |
-          # 定义输出文件名，带上版本号 (如 HashRenamer_Setup_v1.0.55)
-          $outputName = "HashRenamer_Setup_v${{ env.BUILD_VERSION }}"
+          # 定义输出文件名
+          OUTPUT_NAME="HashRenamer_Setup_v${BUILD_VERSION}"
           
-          # 确保 Output 目录存在
-          if (-not (Test-Path "Output")) { New-Item -ItemType Directory -Path "Output" }
+          mkdir -p Output
           
-          # 编译命令：
-          # /DMyAppVersion="..." -> 覆盖 .iss 中的版本号
-          # /O"Output"         -> 强制指定输出目录
-          # /F"..."            -> 强制指定输出文件名
-          iscc /DMyAppVersion="${{ env.BUILD_VERSION }}" /O"Output" /F"$outputName" installer.iss
+          # 双斜杠 // 用于参数转义
+          iscc "//DMyAppVersion=${BUILD_VERSION}" "//OOutput" "//F$OUTPUT_NAME" installer.iss
           
-          # 记录文件名供上传步骤使用
-          echo "INSTALLER_NAME=$outputName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          # 记录环境变量
+          echo "INSTALLER_NAME=$OUTPUT_NAME" >> $GITHUB_ENV
 
       - name: Upload Installer
         uses: actions/upload-artifact@v4
         with:
-          # Artifact 名称也带上版本号，方便下载区分
+          # Artifact 名称也带上版本号
           name: HashRenamer_Installer_v${{ env.BUILD_VERSION }}
-          # 上传 Output 目录下的对应文件
           path: Output/${{ env.INSTALLER_NAME }}.exe
           retention-days: 90
