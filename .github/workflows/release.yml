@@ -1,0 +1,62 @@
+name: Build Installer on Push
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build Windows Installer
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+        with:
+          key: hash-renamer-build
+
+      # Detects CPU/Memory to speed up compilation
+      - name: Auto-Tune Build Parameters
+        shell: powershell
+        run: |
+          $cpuCount = $env:NUMBER_OF_PROCESSORS
+          $memObj = Get-CimInstance Win32_ComputerSystem
+          $totalMemMB = [math]::Round($memObj.TotalPhysicalMemory / 1MB)
+          $maxJobsByMem = [math]::Floor($totalMemMB / 1500)
+          
+          if ($maxJobsByMem -lt $cpuCount -and $maxJobsByMem -gt 0) {
+              $finalJobs = $maxJobsByMem
+          } else {
+              $finalJobs = $cpuCount
+          }
+          "CARGO_BUILD_JOBS=$finalJobs" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build Binary
+        run: |
+          Write-Host "Building with ${{ env.CARGO_BUILD_JOBS }} jobs..."
+          cargo build --release --verbose --jobs ${{ env.CARGO_BUILD_JOBS }}
+
+      - name: Install Inno Setup
+        run: choco install innosetup
+
+      # Compiles the installer script
+      - name: Compile Installer (.exe)
+        run: iscc installer.iss
+
+      # Uploads the finished installer to GitHub Actions Summary
+      - name: Upload Installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: HashRenamer_Installer
+          path: Output/HashRenamer_Setup.exe
+          retention-days: 5
