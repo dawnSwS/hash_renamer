@@ -13,9 +13,40 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
-      - name: Install Rust
+      - name: Generate Version Number
+        id: versioning
+        shell: powershell
+        run: |
+          # 读取 Cargo.toml 内容
+          $cargoContent = Get-Content Cargo.toml -Raw
+          
+          # 正则提取主版本号 (Major.Minor)
+          if ($cargoContent -match 'version\s*=\s*"(?<ver>\d+\.\d+)\.\d+"') {
+              $baseVersion = $Matches.ver
+          } else {
+              $baseVersion = "1.0"
+          }
+          
+          # 组合新版本号
+          $newVersion = "$baseVersion.${{ github.run_number }}"
+          Write-Host "::notice::Target Build Version: $newVersion"
+          
+          # 将版本号保存到环境变量
+          echo "BUILD_VERSION=$newVersion" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      # ----------------------------------------------------------------
+      # 2. 修改 Cargo.toml 版本
+      # 目的：让编译出的 .exe 文件属性中包含正确的版本信息
+      # ----------------------------------------------------------------
+      - name: Update Cargo Version
+        shell: powershell
+        run: |
+          $ver = $env:BUILD_VERSION
+          (Get-Content Cargo.toml) -replace '^version = ".*"', "version = `"$ver`"" | Set-Content Cargo.toml
+
+      - name: Install Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
@@ -23,40 +54,42 @@ jobs:
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
         with:
-          key: hash-renamer-build
+          key: windows-release-build
 
-      # Detects CPU/Memory to speed up compilation
-      - name: Auto-Tune Build Parameters
-        shell: powershell
-        run: |
-          $cpuCount = $env:NUMBER_OF_PROCESSORS
-          $memObj = Get-CimInstance Win32_ComputerSystem
-          $totalMemMB = [math]::Round($memObj.TotalPhysicalMemory / 1MB)
-          $maxJobsByMem = [math]::Floor($totalMemMB / 1500)
-          
-          if ($maxJobsByMem -lt $cpuCount -and $maxJobsByMem -gt 0) {
-              $finalJobs = $maxJobsByMem
-          } else {
-              $finalJobs = $cpuCount
-          }
-          "CARGO_BUILD_JOBS=$finalJobs" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Build Binary
-        run: |
-          Write-Host "Building with ${{ env.CARGO_BUILD_JOBS }} jobs..."
-          cargo build --release --verbose --jobs ${{ env.CARGO_BUILD_JOBS }}
+      - name: Build Binary (Release)
+        # --release 会自动应用我们在 Cargo.toml 里的体积优化配置
+        run: cargo build --release --verbose
 
       - name: Install Inno Setup
-        run: choco install innosetup
+        run: choco install innosetup --no-progress
 
-      # Compiles the installer script
+      # ----------------------------------------------------------------
+      # 3. 编译安装包 (ISCC)
+      # 优化：使用命令行参数 /D 和 /F 动态传入版本号和文件名
+      # ----------------------------------------------------------------
       - name: Compile Installer (.exe)
-        run: iscc installer.iss
+        shell: powershell
+        run: |
+          # 定义输出文件名，带上版本号 (如 HashRenamer_Setup_v1.0.55)
+          $outputName = "HashRenamer_Setup_v${{ env.BUILD_VERSION }}"
+          
+          # 确保 Output 目录存在
+          if (-not (Test-Path "Output")) { New-Item -ItemType Directory -Path "Output" }
+          
+          # 编译命令：
+          # /DMyAppVersion="..." -> 覆盖 .iss 中的版本号
+          # /O"Output"         -> 强制指定输出目录
+          # /F"..."            -> 强制指定输出文件名
+          iscc /DMyAppVersion="${{ env.BUILD_VERSION }}" /O"Output" /F"$outputName" installer.iss
+          
+          # 记录文件名供上传步骤使用
+          echo "INSTALLER_NAME=$outputName" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      # Uploads the finished installer to GitHub Actions Summary
       - name: Upload Installer
         uses: actions/upload-artifact@v4
         with:
-          name: HashRenamer_Installer
-          path: Output/HashRenamer_Setup.exe
-          retention-days: 5
+          # Artifact 名称也带上版本号，方便下载区分
+          name: HashRenamer_Installer_v${{ env.BUILD_VERSION }}
+          # 上传 Output 目录下的对应文件
+          path: Output/${{ env.INSTALLER_NAME }}.exe
+          retention-days: 90
