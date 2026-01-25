@@ -53,7 +53,7 @@ jobs:
 
       - name: Build Binary (Release)
         # --release 会自动应用我们在 Cargo.toml 里的体积优化配置
-        run: cargo build --release --verbose
+        run: cargo build --release
 
       - name: Install Inno Setup
         run: choco install innosetup --no-progress
