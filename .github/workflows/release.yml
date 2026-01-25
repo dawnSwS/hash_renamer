@@ -60,21 +60,25 @@ jobs:
 
       # ----------------------------------------------------------------
       # 3. 编译安装包 (ISCC)
-      # [修复] Bash 调用 Windows 程序 (注意 // 参数)
+      # [修复] 切换为 CMD，原生支持 Windows 参数 (/D, /O)，无需双斜杠 hack
       # ----------------------------------------------------------------
       - name: Compile Installer (.exe)
-        shell: bash
+        shell: cmd
         run: |
-          # 定义输出文件名
-          OUTPUT_NAME="HashRenamer_Setup_v${BUILD_VERSION}"
+          :: 1. 设置变量 (建议使用 set "VAR=Val" 格式防止尾部空格)
+          ::    CMD 中引用变量使用 %VAR%
+          set "OUTPUT_NAME=HashRenamer_Setup_v%BUILD_VERSION%"
           
-          mkdir -p Output
+          :: 2. 创建输出目录 (CMD 需先判断是否存在)
+          if not exist Output mkdir Output
           
-          # 双斜杠 // 用于参数转义
-          iscc "//DMyAppVersion=${BUILD_VERSION}" "//OOutput" "//F$OUTPUT_NAME" installer.iss
+          :: 3. 执行 ISCC 编译
+          ::    可以直接使用 /D, /O, /F，清晰且符合官方文档
+          iscc "/DMyAppVersion=%BUILD_VERSION%" "/OOutput" "/F%OUTPUT_NAME%" installer.iss
           
-          # 记录环境变量
-          echo "INSTALLER_NAME=$OUTPUT_NAME" >> $GITHUB_ENV
+          :: 4. 写入环境变量 (CMD 写法)
+          ::    注意：>> 紧跟在值后面，不要加空格，否则变量值里会多出一个空格
+          echo INSTALLER_NAME=%OUTPUT_NAME%>> %GITHUB_ENV%
 
       - name: Upload Installer
         uses: actions/upload-artifact@v4
@@ -82,4 +86,3 @@ jobs:
           # Artifact 名称也带上版本号
           name: HashRenamer_Installer_v${{ env.BUILD_VERSION }}
           path: Output/${{ env.INSTALLER_NAME }}.exe
-          retention-days: 90
