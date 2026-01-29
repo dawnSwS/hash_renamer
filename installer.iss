@@ -9,7 +9,7 @@
 #endif
 
 [Setup]
-AppId={{B927D793-HASH-RENAME-ABC}
+AppId={{326968ce-83cd-470c-b1a8-cc4d01ffff43}
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
