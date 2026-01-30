@@ -7,6 +7,9 @@ edition = "2021"
 md5 = "0.7"
 rayon = "1.8"
 
+[build-dependencies]
+winres = "0.1"
+
 [profile.release]
 opt-level = 3
 lto = true

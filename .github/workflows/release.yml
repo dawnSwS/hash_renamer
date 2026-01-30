@@ -15,6 +15,16 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # [新增] 准备应用图标
+      - name: Prepare Application Icon
+        shell: bash
+        run: |
+          # 下载 "Label" (标签) emoji 作为图标，寓意重命名/打标
+          # Google Noto Emoji: u1f3f7 (🏷️)
+          curl -L "https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/128/emoji_u1f3f7.png" -o "app_icon.png"
+          # 使用 ImageMagick 转换为多尺寸 ico
+          magick app_icon.png -define icon:auto-resize=64,48,32,16 app_icon.ico
+
       # [修复] Bash 版本号生成
       - name: Generate Version Number
         id: versioning
@@ -34,7 +44,6 @@ jobs:
 
       # ----------------------------------------------------------------
       # 2. 修改 Cargo.toml 版本
-      # [修复] Bash + sed，无 BOM 烦恼
       # ----------------------------------------------------------------
       - name: Update Cargo Version
         shell: bash
@@ -62,29 +71,20 @@ jobs:
 
       # ----------------------------------------------------------------
       # 3. 编译安装包 (ISCC)
-      # [修复] 切换为 CMD，原生支持 Windows 参数 (/D, /O)，无需双斜杠 hack
       # ----------------------------------------------------------------
       - name: Compile Installer (.exe)
         shell: cmd
         run: |
-          :: 1. 设置变量 (建议使用 set "VAR=Val" 格式防止尾部空格)
-          ::    CMD 中引用变量使用 %VAR%
           set "OUTPUT_NAME=HashRenamer_Setup_v%BUILD_VERSION%"
           
-          :: 2. 创建输出目录 (CMD 需先判断是否存在)
           if not exist Output mkdir Output
           
-          :: 3. 执行 ISCC 编译
-          ::    可以直接使用 /D, /O, /F，清晰且符合官方文档
           iscc "/DMyAppVersion=%BUILD_VERSION%" "/OOutput" "/F%OUTPUT_NAME%" installer.iss
           
-          :: 4. 写入环境变量 (CMD 写法)
-          ::    注意：>> 紧跟在值后面，不要加空格，否则变量值里会多出一个空格
           echo INSTALLER_NAME=%OUTPUT_NAME%>> %GITHUB_ENV%
 
       - name: Upload Installer
         uses: actions/upload-artifact@v4
         with:
-          # Artifact 名称也带上版本号
           name: HashRenamer_Installer_v${{ env.BUILD_VERSION }}
           path: Output/${{ env.INSTALLER_NAME }}.exe
